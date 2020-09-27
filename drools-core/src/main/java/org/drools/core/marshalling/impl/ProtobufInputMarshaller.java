@@ -17,16 +17,7 @@
 package org.drools.core.marshalling.impl;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -58,6 +49,7 @@ import org.drools.core.phreak.PhreakTimerNode.Scheduler;
 import org.drools.core.phreak.RuleAgendaItem;
 import org.drools.core.phreak.RuleExecutor;
 import org.drools.core.process.instance.WorkItem;
+import org.drools.core.reteoo.BaseTuple;
 import org.drools.core.reteoo.ObjectTypeConf;
 import org.drools.core.reteoo.TerminalNode;
 import org.drools.core.rule.EntryPointId;
@@ -303,26 +295,53 @@ public class ProtobufInputMarshaller {
     private static void readNodeMemories(MarshallerReaderContext context,
                                          RuleData _session) {
         for ( ProtobufMessages.NodeMemory _node : _session.getNodeMemoryList() ) {
+            Object memory;
             switch ( _node.getNodeType() ) {
                 case QUERY_ELEMENT : {
-                    Map<TupleKey, QueryElementContext> memory = new HashMap<TupleKey, QueryElementContext>();
+                    Map<TupleKey, QueryElementContext> map = new HashMap<TupleKey, QueryElementContext>();
                     for ( ProtobufMessages.NodeMemory.QueryElementNodeMemory.QueryContext _ctx : _node.getQueryElement().getContextList() ) {
                         // we have to use a "cloned" query element context as we need to write on it during deserialization process and the 
                         // protobuf one is read-only
-                        memory.put( PersisterHelper.createTupleKey( _ctx.getTuple() ), new QueryElementContext( _ctx ) );
+                        map.put( PersisterHelper.createTupleKey( _ctx.getTuple() ), new QueryElementContext( _ctx ) );
                     }
-                    context.getNodeMemories().put(_node.getNodeId(), memory);
+
+                    memory = map;
                     break;
                 }
-                case RIA:
-                case FROM:
-                case ACCUMULATE:
-                    //skip legacy written node memory for ensuring backward compatibility
+                case ACCUMULATE: {
+                    Map<TupleKey, ProtobufMessages.FactHandle> map = new HashMap<TupleKey, ProtobufMessages.FactHandle>();
+                    for (ProtobufMessages.NodeMemory.AccumulateNodeMemory.AccumulateContext _ctx : _node.getAccumulate().getContextList()) {
+                        map.put(PersisterHelper.createTupleKey(_ctx.getTuple()), _ctx.getResultHandle());
+                    }
+                    memory = map;
                     break;
+                }
+                case RIA: {
+                    Map<TupleKey, ProtobufMessages.FactHandle> map = new HashMap<TupleKey, ProtobufMessages.FactHandle>();
+                    for (ProtobufMessages.NodeMemory.RIANodeMemory.RIAContext _ctx : _node.getRia().getContextList()) {
+                        map.put(PersisterHelper.createTupleKey(_ctx.getTuple()), _ctx.getResultHandle());
+                    }
+                    memory = map;
+                    break;
+                }
+                case FROM: {
+                    Map<TupleKey, List<ProtobufMessages.FactHandle>> map = new HashMap<>();
+                    for (ProtobufMessages.NodeMemory.FromNodeMemory.FromContext _ctx : _node.getFrom().getContextList()) {
+                        // have to instantiate a modifiable list
+                        map.put(PersisterHelper.createTupleKey(_ctx.getTuple()), new LinkedList<>(_ctx.getHandleList()));
+                    }
+                    memory = map;
+                    break;
+                }
                 default : {
                     throw new IllegalArgumentException( "Unknown node type " + _node.getNodeType() + " while deserializing session." );
                 }
             }
+
+            if(memory != null){
+                context.getNodeMemories().put(_node.getNodeId(), memory);
+            }
+
         }
     }
 
@@ -799,6 +818,24 @@ public class ProtobufInputMarshaller {
                 }
                 return true;
             } else {
+                ActivationKey key = PersisterHelper.createActivationKey( rtn.getRule().getPackageName(), rtn.getRule().getName(), activation.getTuple() );
+                // add the tuple to the cache for correlation
+                this.tuplesCache.put( key, activation.getTuple() );
+
+                InternalFactHandle[] internalFactHandles = activation.getTuple().toFactHandles();
+
+                for(InternalFactHandle factHandle : internalFactHandles) {
+
+                    final Tuple parent = ((BaseTuple) activation).getParent();
+                    if(parent != null) {
+                        int nodeId = parent.getTupleSink().getId();
+
+
+
+                    }
+                }
+
+
 
                 RuleImpl rule = activation.getRule();
                 ActivationKey activationKey = PersisterHelper.hasNodeMemory( rtn ) ?
